@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/samuelenocsson/devops-tui/internal/api"
+	"github.com/samuelenocsson/devops-tui/internal/auth"
 	"github.com/samuelenocsson/devops-tui/internal/config"
 	"github.com/samuelenocsson/devops-tui/internal/ui"
 )
@@ -24,8 +25,25 @@ func Execute() error {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
-	// Create API client
-	client := api.NewClient(cfg)
+	// Handle authentication
+	var client *api.Client
+
+	if cfg.NeedsOAuth() {
+		// No PAT provided, use OAuth device flow
+		authenticator := auth.NewDeviceFlowAuthenticator()
+
+		token, err := authenticator.GetToken()
+		if err != nil {
+			return fmt.Errorf("authentication failed: %w", err)
+		}
+
+		// Create client with OAuth token
+		cfg.SetAccessToken(token)
+		client = api.NewClientWithToken(cfg, token, false)
+	} else {
+		// PAT provided, use it directly
+		client = api.NewClient(cfg)
+	}
 
 	// Create and run the TUI
 	app := ui.NewApp(client)

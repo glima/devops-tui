@@ -27,8 +27,16 @@ type Client struct {
 
 // NewClient creates a new Azure DevOps API client
 func NewClient(cfg *config.Config) *Client {
-	// Azure DevOps uses Basic auth with empty username and PAT as password
-	auth := base64.StdEncoding.EncodeToString([]byte(":" + cfg.PAT))
+	var authHeader string
+
+	if cfg.IsPAT() {
+		// Azure DevOps uses Basic auth with empty username and PAT as password
+		auth := base64.StdEncoding.EncodeToString([]byte(":" + cfg.PAT))
+		authHeader = "Basic " + auth
+	} else {
+		// OAuth uses Bearer token
+		authHeader = "Bearer " + cfg.GetToken()
+	}
 
 	return &Client{
 		httpClient: &http.Client{
@@ -37,7 +45,35 @@ func NewClient(cfg *config.Config) *Client {
 		baseURL:      cfg.BaseURL(),
 		teamURL:      cfg.TeamURL(),
 		webURL:       cfg.WebURL(),
-		authHeader:   "Basic " + auth,
+		authHeader:   authHeader,
+		organization: cfg.Organization,
+		project:      cfg.Project,
+		team:         cfg.Team,
+	}
+}
+
+// NewClientWithToken creates a new Azure DevOps API client with a specific token
+// isPAT indicates whether the token is a Personal Access Token or an OAuth token
+func NewClientWithToken(cfg *config.Config, token string, isPAT bool) *Client {
+	var authHeader string
+
+	if isPAT {
+		// Azure DevOps uses Basic auth with empty username and PAT as password
+		auth := base64.StdEncoding.EncodeToString([]byte(":" + token))
+		authHeader = "Basic " + auth
+	} else {
+		// OAuth uses Bearer token
+		authHeader = "Bearer " + token
+	}
+
+	return &Client{
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		baseURL:      cfg.BaseURL(),
+		teamURL:      cfg.TeamURL(),
+		webURL:       cfg.WebURL(),
+		authHeader:   authHeader,
 		organization: cfg.Organization,
 		project:      cfg.Project,
 		team:         cfg.Team,

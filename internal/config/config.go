@@ -8,6 +8,14 @@ import (
 	"github.com/spf13/viper"
 )
 
+// AuthMethod represents the authentication method being used
+type AuthMethod string
+
+const (
+	AuthMethodPAT   AuthMethod = "pat"
+	AuthMethodOAuth AuthMethod = "oauth"
+)
+
 // Config holds the application configuration
 type Config struct {
 	Organization string   `mapstructure:"organization"`
@@ -16,6 +24,9 @@ type Config struct {
 	PAT          string   `mapstructure:"pat"`
 	Theme        string   `mapstructure:"theme"`
 	Defaults     Defaults `mapstructure:"defaults"`
+	// Runtime fields (not from config file)
+	AuthMethod  AuthMethod `mapstructure:"-"`
+	AccessToken string     `mapstructure:"-"`
 }
 
 // Defaults holds default filter settings
@@ -26,6 +37,7 @@ type Defaults struct {
 }
 
 // Load loads the configuration from file and environment
+// Note: This no longer requires PAT - authentication can happen via device flow
 func Load() (*Config, error) {
 	v := viper.New()
 
@@ -68,7 +80,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 
-	// Validate required fields
+	// Validate required fields (excluding PAT - that's optional now)
 	if cfg.Organization == "" {
 		return nil, fmt.Errorf("organization is required (set in config or AZURE_DEVOPS_ORG)")
 	}
@@ -78,11 +90,45 @@ func Load() (*Config, error) {
 	if cfg.Team == "" {
 		return nil, fmt.Errorf("team is required (set in config or AZURE_DEVOPS_TEAM)")
 	}
-	if cfg.PAT == "" {
-		return nil, fmt.Errorf("PAT is required (set in config or AZURE_DEVOPS_PAT)")
+
+	// Determine auth method based on whether PAT is provided
+	if cfg.PAT != "" {
+		cfg.AuthMethod = AuthMethodPAT
+	} else {
+		cfg.AuthMethod = AuthMethodOAuth
 	}
 
 	return &cfg, nil
+}
+
+// LoadWithoutAuth loads configuration without requiring any authentication
+// Useful for checking config before initiating auth flow
+func LoadWithoutAuth() (*Config, error) {
+	return Load()
+}
+
+// NeedsOAuth returns true if OAuth device flow is needed
+func (c *Config) NeedsOAuth() bool {
+	return c.PAT == "" && c.AccessToken == ""
+}
+
+// SetAccessToken sets the OAuth access token
+func (c *Config) SetAccessToken(token string) {
+	c.AccessToken = token
+	c.AuthMethod = AuthMethodOAuth
+}
+
+// GetToken returns the active token (PAT or OAuth access token)
+func (c *Config) GetToken() string {
+	if c.PAT != "" {
+		return c.PAT
+	}
+	return c.AccessToken
+}
+
+// IsPAT returns true if using PAT authentication
+func (c *Config) IsPAT() bool {
+	return c.AuthMethod == AuthMethodPAT
 }
 
 // BaseURL returns the Azure DevOps API base URL
@@ -126,6 +172,8 @@ team: "my-team"
 
 # Authentication
 # PAT can be set here or via environment variable AZURE_DEVOPS_PAT
+# If no PAT is provided, the tool will use OAuth device flow
+# to authenticate interactively via your browser
 pat: ""
 
 # UI settings
@@ -139,4 +187,13 @@ defaults:
 `
 
 	return os.WriteFile(configPath, []byte(content), 0600)
+}
+
+// GetConfigDir returns the configuration directory path
+func GetConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "."
+	}
+	return filepath.Join(home, ".config", "devops-tui")
 }

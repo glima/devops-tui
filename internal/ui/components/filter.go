@@ -65,6 +65,28 @@ func (f FilterPanel) Update(msg tea.Msg) (FilterPanel, tea.Cmd) {
 				group.MoveToBottom()
 				f.adjustOffset(group)
 			}
+		case msg.Type == tea.KeyPgUp:
+			if group := f.filterState.ActiveFilterGroup(); group != nil {
+				jump := maxVisibleOptions / 2
+				if jump < 1 {
+					jump = 1
+				}
+				for i := 0; i < jump && group.Cursor > 0; i++ {
+					group.MoveUp()
+				}
+				f.adjustOffset(group)
+			}
+		case msg.Type == tea.KeyPgDown:
+			if group := f.filterState.ActiveFilterGroup(); group != nil {
+				jump := maxVisibleOptions / 2
+				if jump < 1 {
+					jump = 1
+				}
+				for i := 0; i < jump && group.Cursor < len(group.Options)-1; i++ {
+					group.MoveDown()
+				}
+				f.adjustOffset(group)
+			}
 		case key.Matches(msg, f.keys.Select):
 			if group := f.filterState.ActiveFilterGroup(); group != nil {
 				group.SelectCurrent()

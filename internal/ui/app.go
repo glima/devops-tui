@@ -22,6 +22,7 @@ type Panel int
 const (
 	PanelFilter Panel = iota
 	PanelWorkItems
+	PanelDetails
 )
 
 // ViewMode represents the current view mode
@@ -38,7 +39,7 @@ type App struct {
 	filterPanel    components.FilterPanel
 	workItemsPanel components.WorkItemsPanel
 	detailsPanel   components.DetailsPanel
-	detailView     components.DetailView
+	detailView     *components.DetailView
 	helpPanel      components.HelpPanel
 	stateModal     components.StateModal
 	branchModal    components.BranchModal
@@ -78,11 +79,14 @@ func NewApp(client *api.Client) App {
 	// Create empty filter state (will be populated after loading data)
 	filterState := models.NewFilterState(nil, nil, nil)
 
+	// Initialize detailView separately to get pointer
+	detailView := components.NewDetailView(styles, keys)
+
 	return App{
 		filterPanel:    components.NewFilterPanel(filterState, styles, keys),
 		workItemsPanel: components.NewWorkItemsPanel(styles, keys),
-		detailsPanel:   components.NewDetailsPanel(styles),
-		detailView:     components.NewDetailView(styles, keys),
+		detailsPanel:   components.NewDetailsPanel(styles, keys),
+		detailView:     &detailView,
 		helpPanel:      components.NewHelpPanel(keys, styles),
 		stateModal:     components.NewStateModal(styles, keys),
 		branchModal:    components.NewBranchModal(styles, keys),
@@ -162,8 +166,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle detail view mode
 		if a.viewMode == ViewDetail {
-			newDetailView, cmd := a.detailView.Update(msg)
-			a.detailView = newDetailView
+			_, cmd := a.detailView.Update(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -232,6 +235,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+		case PanelDetails:
+			newDetails, cmd := a.detailsPanel.Update(msg)
+			a.detailsPanel = newDetails
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 
 	case dataLoadedMsg:
@@ -278,7 +287,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case components.ViewWorkItemMsg:
 		a.viewMode = ViewDetail
-		a.detailView.SetItem(&msg.Item)
+		// Load full work item details including comments
+		return a, loadFullWorkItemCmd(a.client, msg.Item.ID)
+
+	case fullWorkItemLoadedMsg:
+		a.detailView.SetItem(msg.item)
 		a.updateSizes()
 
 	case components.CloseDetailViewMsg:
@@ -446,8 +459,11 @@ func (a *App) renderStatusBar() string {
 
 	// Panel indicator
 	panelName := "Filter"
-	if a.activePanel == PanelWorkItems {
+	switch a.activePanel {
+	case PanelWorkItems:
 		panelName = "Work Items"
+	case PanelDetails:
+		panelName = "Details"
 	}
 	parts = append(parts, a.styles.HelpKey.Render("Panel")+": "+panelName)
 
@@ -459,17 +475,23 @@ func (a *App) renderStatusBar() string {
 }
 
 func (a *App) nextPanel() {
-	if a.activePanel == PanelFilter {
+	switch a.activePanel {
+	case PanelFilter:
 		a.activePanel = PanelWorkItems
-	} else {
+	case PanelWorkItems:
+		a.activePanel = PanelDetails
+	case PanelDetails:
 		a.activePanel = PanelFilter
 	}
 }
 
 func (a *App) prevPanel() {
-	if a.activePanel == PanelWorkItems {
+	switch a.activePanel {
+	case PanelFilter:
+		a.activePanel = PanelDetails
+	case PanelWorkItems:
 		a.activePanel = PanelFilter
-	} else {
+	case PanelDetails:
 		a.activePanel = PanelWorkItems
 	}
 }
@@ -477,6 +499,7 @@ func (a *App) prevPanel() {
 func (a *App) updateFocus() {
 	a.filterPanel.SetFocused(a.activePanel == PanelFilter)
 	a.workItemsPanel.SetFocused(a.activePanel == PanelWorkItems)
+	a.detailsPanel.SetFocused(a.activePanel == PanelDetails)
 }
 
 func (a *App) updateSizes() {
@@ -501,6 +524,10 @@ type dataLoadedMsg struct {
 
 type workItemsLoadedMsg struct {
 	items []models.WorkItem
+}
+
+type fullWorkItemLoadedMsg struct {
+	item *models.WorkItem
 }
 
 type errMsg struct {
@@ -553,6 +580,16 @@ func loadWorkItemsCmd(client *api.Client, filterState *models.FilterState) tea.C
 			return errMsg{err: err}
 		}
 		return workItemsLoadedMsg{items: items}
+	}
+}
+
+func loadFullWorkItemCmd(client *api.Client, id int) tea.Cmd {
+	return func() tea.Msg {
+		item, err := client.GetWorkItem(id)
+		if err != nil {
+			return errMsg{err: err}
+		}
+		return fullWorkItemLoadedMsg{item: item}
 	}
 }
 

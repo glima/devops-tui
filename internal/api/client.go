@@ -11,7 +11,10 @@ import (
 	"github.com/samuelenocsson/devops-tui/internal/config"
 )
 
-const apiVersion = "7.1"
+const (
+	apiVersion        = "7.1"
+	apiVersionPreview = "7.1-preview"
+)
 
 // Client is the Azure DevOps API client
 type Client struct {
@@ -121,6 +124,16 @@ func (c *Client) getTeam(endpoint string) (*http.Response, error) {
 
 // getWithBase performs a GET request with a specific base URL
 func (c *Client) getWithBase(baseURL, endpoint string) (*http.Response, error) {
+	return c.getWithBaseAndVersion(baseURL, endpoint, apiVersion)
+}
+
+// getPreview performs a GET request using preview API version
+func (c *Client) getPreview(endpoint string) (*http.Response, error) {
+	return c.getWithBaseAndVersion(c.baseURL, endpoint, apiVersionPreview)
+}
+
+// getWithBaseAndVersion performs a GET request with a specific base URL and API version
+func (c *Client) getWithBaseAndVersion(baseURL, endpoint, version string) (*http.Response, error) {
 	url := fmt.Sprintf("%s%s", baseURL, endpoint)
 	if endpoint[0] != '/' {
 		url = fmt.Sprintf("%s/%s", baseURL, endpoint)
@@ -137,7 +150,7 @@ func (c *Client) getWithBase(baseURL, endpoint string) (*http.Response, error) {
 				}
 			}
 		}
-		url = fmt.Sprintf("%s%sapi-version=%s", url, separator, apiVersion)
+		url = fmt.Sprintf("%s%sapi-version=%s", url, separator, version)
 	}
 
 	return c.doRequest("GET", url, nil)

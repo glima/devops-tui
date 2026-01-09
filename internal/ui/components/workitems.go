@@ -12,6 +12,16 @@ import (
 	"github.com/samuelenocsson/devops-tui/internal/ui/theme"
 )
 
+// isPageUp checks if the key message is PageUp
+func isPageUp(msg tea.KeyMsg) bool {
+	return msg.Type == tea.KeyPgUp
+}
+
+// isPageDown checks if the key message is PageDown
+func isPageDown(msg tea.KeyMsg) bool {
+	return msg.Type == tea.KeyPgDown
+}
+
 // SortField represents the field to sort by
 type SortField int
 
@@ -59,10 +69,10 @@ func NewWorkItemsPanel(styles theme.Styles, keys theme.KeyMap) WorkItemsPanel {
 		styles: styles,
 		keys:   keys,
 		columns: []column{
-			{title: "ID", width: 7, minWidth: 6},
-			{title: "TYPE", width: 8, minWidth: 6},
-			{title: "STATE", width: 12, minWidth: 8},
-			{title: "ASSIGNED", width: 14, minWidth: 10},
+			{title: "ID", width: 10, minWidth: 10},    // #12345678 - never truncate
+			{title: "TYPE", width: 8, minWidth: 8},    // Feature, PBI, etc - never truncate
+			{title: "STATE", width: 12, minWidth: 12}, // In Progress - never truncate
+			{title: "ASSIGNED", width: 16, minWidth: 12},
 			{title: "TITLE", flex: true, minWidth: 20},
 		},
 	}
@@ -90,6 +100,43 @@ func (w WorkItemsPanel) Update(msg tea.Msg) (WorkItemsPanel, tea.Cmd) {
 			w.moveToTop()
 		case key.Matches(msg, w.keys.Bottom):
 			w.moveToBottom()
+		case isPageUp(msg):
+			jump := w.visibleItemCount() / 2
+			if jump < 1 {
+				jump = 1
+			}
+			w.cursor -= jump
+			if w.cursor < 0 {
+				w.cursor = 0
+			}
+			// Adjust offset
+			visible := w.visibleItemCount()
+			if w.cursor < w.offset {
+				w.offset = w.cursor
+			}
+			if w.cursor >= w.offset+visible {
+				w.offset = w.cursor - visible + 1
+			}
+		case isPageDown(msg):
+			jump := w.visibleItemCount() / 2
+			if jump < 1 {
+				jump = 1
+			}
+			w.cursor += jump
+			if w.cursor >= len(w.items) {
+				w.cursor = len(w.items) - 1
+			}
+			if w.cursor < 0 {
+				w.cursor = 0
+			}
+			// Adjust offset
+			visible := w.visibleItemCount()
+			if w.cursor < w.offset {
+				w.offset = w.cursor
+			}
+			if w.cursor >= w.offset+visible {
+				w.offset = w.cursor - visible + 1
+			}
 		case key.Matches(msg, w.keys.Open):
 			if w.SelectedItem() != nil {
 				return w, func() tea.Msg { return OpenWorkItemMsg{Item: *w.SelectedItem()} }
@@ -146,17 +193,19 @@ func (w WorkItemsPanel) View() string {
 		}
 	}
 
-	// Apply panel styling
+	// Apply panel styling with MaxHeight to prevent overflow
 	content := b.String()
 	if w.focused {
 		return w.styles.PanelActive.
 			Width(w.width).
 			Height(w.height).
+			MaxHeight(w.height + 2).
 			Render(content)
 	}
 	return w.styles.PanelInactive.
 		Width(w.width).
 		Height(w.height).
+		MaxHeight(w.height + 2).
 		Render(content)
 }
 
@@ -253,14 +302,15 @@ func (w *WorkItemsPanel) renderItem(item models.WorkItem, isCursor bool, colWidt
 		cursor = "▸ "
 	}
 
-	// Format values
+	// Format values - ID, TYPE, STATE never truncated; ASSIGNED and TITLE can be
 	id := fmt.Sprintf("#%d", item.ID)
 	typeStr := item.ShortType()
 	stateStr := string(item.State)
-	assigned := truncateStr(item.AssignedTo, colWidths[3])
+	assigned := item.AssignedTo
 	if assigned == "" {
 		assigned = "-"
 	}
+	assigned = truncateStr(assigned, colWidths[3])
 	title := truncateStr(item.Title, colWidths[4])
 
 	// For cursor row, use plain text with unified background
@@ -269,13 +319,14 @@ func (w *WorkItemsPanel) renderItem(item models.WorkItem, isCursor bool, colWidt
 			Bold(true).
 			Foreground(lipgloss.Color("#F9FAFB")).
 			Background(lipgloss.Color("#7C3AED")). // Purple highlight
-			Width(w.width - 4)
+			MaxWidth(w.width - 4).
+			MaxHeight(1)
 
-		// Build plain text cells (no individual colors)
+		// Build plain text cells (no individual colors) - padRight for alignment
 		cells := []string{
-			padRight(truncateStr(id, colWidths[0]), colWidths[0]),
-			padRight(truncateStr(typeStr, colWidths[1]), colWidths[1]),
-			padRight(truncateStr(stateStr, colWidths[2]), colWidths[2]),
+			padRight(id, colWidths[0]),
+			padRight(typeStr, colWidths[1]),
+			padRight(stateStr, colWidths[2]),
 			padRight(assigned, colWidths[3]),
 			padRight(title, colWidths[4]),
 		}
@@ -290,13 +341,13 @@ func (w *WorkItemsPanel) renderItem(item models.WorkItem, isCursor bool, colWidt
 	assignedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
 	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F9FAFB"))
 
-	// Build cells with proper width and colors
+	// Build cells with padRight for alignment, then apply color
 	cells := []string{
-		idStyle.Width(colWidths[0]).Render(truncateStr(id, colWidths[0])),
-		typeStyle.Width(colWidths[1]).Render(truncateStr(typeStr, colWidths[1])),
-		stateStyle.Width(colWidths[2]).Render(truncateStr(stateStr, colWidths[2])),
-		assignedStyle.Width(colWidths[3]).Render(assigned),
-		titleStyle.Width(colWidths[4]).Render(title),
+		idStyle.Render(padRight(id, colWidths[0])),
+		typeStyle.Render(padRight(typeStr, colWidths[1])),
+		stateStyle.Render(padRight(stateStr, colWidths[2])),
+		assignedStyle.Render(padRight(assigned, colWidths[3])),
+		titleStyle.Render(padRight(title, colWidths[4])),
 	}
 
 	row := cursor + strings.Join(cells, "  ")
@@ -334,12 +385,14 @@ func (w *WorkItemsPanel) visibleItemCount() int {
 func (w *WorkItemsPanel) moveUp() {
 	if w.cursor > 0 {
 		w.cursor--
+		w.adjustOffset()
 	}
 }
 
 func (w *WorkItemsPanel) moveDown() {
 	if w.cursor < len(w.items)-1 {
 		w.cursor++
+		w.adjustOffset()
 	}
 }
 
@@ -351,6 +404,47 @@ func (w *WorkItemsPanel) moveToTop() {
 func (w *WorkItemsPanel) moveToBottom() {
 	if len(w.items) > 0 {
 		w.cursor = len(w.items) - 1
+		w.adjustOffset()
+	}
+}
+
+func (w *WorkItemsPanel) pageUp() {
+	jump := w.visibleItemCount() / 2
+	if jump < 1 {
+		jump = 1
+	}
+	w.cursor -= jump
+	if w.cursor < 0 {
+		w.cursor = 0
+	}
+	w.adjustOffset()
+}
+
+func (w *WorkItemsPanel) pageDown() {
+	jump := w.visibleItemCount() / 2
+	if jump < 1 {
+		jump = 1
+	}
+	w.cursor += jump
+	if w.cursor >= len(w.items) {
+		w.cursor = len(w.items) - 1
+	}
+	if w.cursor < 0 {
+		w.cursor = 0
+	}
+	w.adjustOffset()
+}
+
+func (w *WorkItemsPanel) adjustOffset() {
+	visible := w.visibleItemCount()
+	if w.cursor < w.offset {
+		w.offset = w.cursor
+	}
+	if w.cursor >= w.offset+visible {
+		w.offset = w.cursor - visible + 1
+	}
+	if w.offset < 0 {
+		w.offset = 0
 	}
 }
 
